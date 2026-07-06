@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# данные и результаты
+_smoke_test/
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.webm
+*.mp4
+*.mkv
+*.srt
+*.txt
+!README.md
+!requirements.txt
+
+# разовые скрипты под конкретную запись (не ядро проекта)
+transcribe_25555.py
+clean_25555.py
+fix_25555*.py
+manual_pass*.py
+finalize_25555.py
+run_25555.bat
+_fix_*.py
+_fast_fix_loops.py
