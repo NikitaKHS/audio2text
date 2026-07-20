@@ -1,8 +1,9 @@
 """Виджеты CustomTkinter. Цвета и размеры — константы в начале файла."""
+
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Callable
+from collections.abc import Callable
 
 import customtkinter as ctk
 
@@ -88,13 +89,19 @@ class StepHeader(ctk.CTkFrame):
         texts = ctk.CTkFrame(row, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True, padx=(14, 0))
         ctk.CTkLabel(
-            texts, text=title, font=FONTS["h2"],
-            text_color=COLORS["text"], anchor="w",
+            texts,
+            text=title,
+            font=FONTS["h2"],
+            text_color=COLORS["text"],
+            anchor="w",
         ).pack(anchor="w")
         if subtitle:
             ctk.CTkLabel(
-                texts, text=subtitle, font=FONTS["caption"],
-                text_color=COLORS["text_muted"], anchor="w",
+                texts,
+                text=subtitle,
+                font=FONTS["caption"],
+                text_color=COLORS["text_muted"],
+                anchor="w",
             ).pack(anchor="w", pady=(2, 0))
 
 
@@ -195,8 +202,11 @@ class OutputFolderRow(ctk.CTkFrame):
     ) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         ctk.CTkLabel(
-            self, text="Куда сохранить результат",
-            font=FONTS["label"], text_color=COLORS["text_secondary"], anchor="w",
+            self,
+            text="Куда сохранить результат",
+            font=FONTS["label"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
         ).pack(anchor="w", pady=(0, 8))
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x")
@@ -213,10 +223,16 @@ class OutputFolderRow(ctk.CTkFrame):
             placeholder_text_color=COLORS["text_muted"],
         ).pack(side="left", fill="x", expand=True, padx=(0, 10))
         ctk.CTkButton(
-            row, text="Папка", width=110, height=44,
-            font=FONTS["button"], corner_radius=RADIUS["sm"],
-            fg_color=COLORS["elevated"], hover_color=COLORS["surface_hover"],
-            border_width=1, border_color=COLORS["border"],
+            row,
+            text="Папка",
+            width=110,
+            height=44,
+            font=FONTS["button"],
+            corner_radius=RADIUS["sm"],
+            fg_color=COLORS["elevated"],
+            hover_color=COLORS["surface_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
             text_color=COLORS["text"],
             command=pick_cmd,
         ).pack(side="right")
@@ -233,6 +249,7 @@ class PresetCard(ctk.CTkFrame):
         description: str,
         meta: str,
         on_select: Callable[[str], None],
+        badge: str = "",
         **kwargs,
     ) -> None:
         super().__init__(
@@ -255,22 +272,49 @@ class PresetCard(ctk.CTkFrame):
         pad = ctk.CTkFrame(self, fg_color="transparent")
         pad.pack(fill="both", expand=True, padx=16, pady=16)
 
+        title_row = ctk.CTkFrame(pad, fg_color="transparent")
+        title_row.pack(fill="x")
+
         self.title_lbl = ctk.CTkLabel(
-            pad, text=title, font=FONTS["body_bold"],
-            text_color=COLORS["text"], anchor="w",
+            title_row,
+            text=title,
+            font=FONTS["body_bold"],
+            text_color=COLORS["text"],
+            anchor="w",
         )
-        self.title_lbl.pack(anchor="w")
+        self.title_lbl.pack(side="left", anchor="w")
         self.title_lbl.bind("<Button-1>", self._click)
+        if badge:
+            badge_label = ctk.CTkLabel(
+                title_row,
+                text=f"  {badge}  ",
+                height=24,
+                corner_radius=12,
+                fg_color=COLORS["accent_soft"],
+                text_color=COLORS["accent_hover"],
+                font=FONTS["small"],
+            )
+            badge_label.pack(side="right")
+            badge_label.bind("<Button-1>", self._click)
 
         ctk.CTkLabel(
-            pad, text=description, font=FONTS["caption"],
-            text_color=COLORS["text_secondary"], anchor="w",
-            wraplength=220, justify="left",
+            pad,
+            text=description,
+            font=FONTS["caption"],
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+            wraplength=220,
+            justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
         ctk.CTkLabel(
-            pad, text=meta, font=FONTS["small"],
-            text_color=COLORS["text_muted"], anchor="w",
+            pad,
+            text=meta,
+            font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+            justify="left",
+            wraplength=240,
         ).pack(anchor="w", pady=(10, 0))
 
     def _click(self, _event=None) -> None:
@@ -306,15 +350,21 @@ class ToggleRow(ctk.CTkFrame):
         texts = ctk.CTkFrame(inner, fg_color="transparent")
         texts.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
-            texts, text=title, font=FONTS["label"],
-            text_color=COLORS["text"], anchor="w",
+            texts,
+            text=title,
+            font=FONTS["label"],
+            text_color=COLORS["text"],
+            anchor="w",
         ).pack(anchor="w")
         ctk.CTkLabel(
-            texts, text=subtitle, font=FONTS["caption"],
-            text_color=COLORS["text_muted"], anchor="w",
+            texts,
+            text=subtitle,
+            font=FONTS["caption"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
         ).pack(anchor="w", pady=(2, 0))
 
-        ctk.CTkSwitch(
+        self.switch = ctk.CTkSwitch(
             inner,
             text="",
             variable=variable,
@@ -327,7 +377,11 @@ class ToggleRow(ctk.CTkFrame):
             progress_color=COLORS["accent"],
             button_color="#ffffff",
             button_hover_color="#ffffff",
-        ).pack(side="right", padx=(12, 0))
+        )
+        self.switch.pack(side="right", padx=(12, 0))
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.switch.configure(state="normal" if enabled else "disabled")
 
 
 class FieldCombo(ctk.CTkFrame):
@@ -343,13 +397,19 @@ class FieldCombo(ctk.CTkFrame):
     ) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         ctk.CTkLabel(
-            self, text=label, font=FONTS["label"],
-            text_color=COLORS["text"], anchor="w",
+            self,
+            text=label,
+            font=FONTS["label"],
+            text_color=COLORS["text"],
+            anchor="w",
         ).pack(anchor="w")
         if hint:
             ctk.CTkLabel(
-                self, text=hint, font=FONTS["small"],
-                text_color=COLORS["text_muted"], anchor="w",
+                self,
+                text=hint,
+                font=FONTS["small"],
+                text_color=COLORS["text_muted"],
+                anchor="w",
             ).pack(anchor="w", pady=(2, 8))
         else:
             ctk.CTkFrame(self, height=8, fg_color="transparent").pack()
@@ -381,12 +441,18 @@ class FieldEntry(ctk.CTkFrame):
     ) -> None:
         super().__init__(master, fg_color="transparent", **kwargs)
         ctk.CTkLabel(
-            self, text=label, font=FONTS["label"],
-            text_color=COLORS["text"], anchor="w",
+            self,
+            text=label,
+            font=FONTS["label"],
+            text_color=COLORS["text"],
+            anchor="w",
         ).pack(anchor="w")
         ctk.CTkLabel(
-            self, text=hint, font=FONTS["small"],
-            text_color=COLORS["text_muted"], anchor="w",
+            self,
+            text=hint,
+            font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
         ).pack(anchor="w", pady=(2, 8))
         ctk.CTkEntry(
             self,
@@ -446,29 +512,29 @@ class Collapsible(ctk.CTkFrame):
 
 class PrimaryButton(ctk.CTkButton):
     def __init__(self, master, **kwargs) -> None:
-        super().__init__(
-            master,
-            height=56,
-            corner_radius=RADIUS["md"],
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_hover"],
-            text_color="#ffffff",
-            font=FONTS["button_lg"],
-            **kwargs,
-        )
+        defaults = {
+            "height": 56,
+            "corner_radius": RADIUS["md"],
+            "fg_color": COLORS["accent"],
+            "hover_color": COLORS["accent_hover"],
+            "text_color": "#ffffff",
+            "font": FONTS["button_lg"],
+        }
+        defaults.update(kwargs)
+        super().__init__(master, **defaults)
 
 
 class SecondaryButton(ctk.CTkButton):
     def __init__(self, master, **kwargs) -> None:
-        super().__init__(
-            master,
-            height=48,
-            corner_radius=RADIUS["md"],
-            fg_color=COLORS["elevated"],
-            hover_color=COLORS["surface_hover"],
-            border_width=1,
-            border_color=COLORS["border"],
-            text_color=COLORS["text"],
-            font=FONTS["button"],
-            **kwargs,
-        )
+        defaults = {
+            "height": 48,
+            "corner_radius": RADIUS["md"],
+            "fg_color": COLORS["elevated"],
+            "hover_color": COLORS["surface_hover"],
+            "border_width": 1,
+            "border_color": COLORS["border"],
+            "text_color": COLORS["text"],
+            "font": FONTS["button"],
+        }
+        defaults.update(kwargs)
+        super().__init__(master, **defaults)

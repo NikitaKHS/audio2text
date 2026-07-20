@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 venv/
 .env
+.ruff_cache/
+*.egg-info/
 
 # данные и результаты
 _smoke_test/
@@ -16,8 +18,12 @@ _smoke_test/
 *.mkv
 *.srt
 *.txt
+*.partial.jsonl
 !README.md
 !requirements.txt
+!requirements-*.txt
+accuracy_corrections.json
+_ui*_review.png
 
 # разовые скрипты под конкретную запись (не ядро проекта)
 transcribe_25555.py

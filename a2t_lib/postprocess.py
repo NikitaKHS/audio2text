@@ -1,4 +1,5 @@
 """Фильтрация сегментов после Whisper: spam, loops, junk."""
+
 from __future__ import annotations
 
 import re
@@ -13,8 +14,17 @@ TS_RE = re.compile(
 
 # одно слово, которое Whisper часто печатает сотнями раз на тишине
 SINGLE_WORD_SPAM = {
-    "умереть", "умри", "умрите",
-    "спасибо", "продолжение следует",
+    "умереть",
+    "умри",
+    "умрите",
+    "спасибо",
+    "продолжение следует",
+}
+
+STRUCTURAL_JUNK_REASONS = {
+    "зацикленные hotwords",
+    "повторяющийся фрагмент",
+    "зацикленное слово",
 }
 
 JUNK_PHRASES = re.compile(
@@ -106,7 +116,7 @@ def is_junk(seg: Segment) -> tuple[bool, str]:
     return False, ""
 
 
-def is_live_spam(text: str, repeat_streak: int, threshold: int = 2) -> bool:
+def is_live_spam(text: str, repeat_streak: int, threshold: int = 3) -> bool:
     """Тот же принцип, что в clean_segments, но во время streaming."""
     n = norm(text)
     if n in SINGLE_WORD_SPAM and repeat_streak >= threshold:
@@ -116,17 +126,28 @@ def is_live_spam(text: str, repeat_streak: int, threshold: int = 2) -> bool:
     return False
 
 
-def clean_segments(segments: list[Segment], source_name: str = "raw") -> tuple[list[Segment], list[str]]:
+def clean_segments(
+    segments: list[Segment], source_name: str = "raw"
+) -> tuple[list[Segment], list[str]]:
     log: list[str] = [f"# Постобработка — {source_name}\n"]
     removed = 0
     spam_removed = 0
     kept: list[Segment] = []
+    previous_norm = ""
+    repeat_streak = 0
 
     for i, seg in enumerate(segments):
+        current_norm = norm(seg.text)
+        if current_norm and current_norm == previous_norm:
+            repeat_streak += 1
+        else:
+            repeat_streak = 1 if current_norm else 0
+            previous_norm = current_norm
+
         if is_single_word_spam(seg.text):
-            if keep_legitimate_context(segments, i):
-                kept.append(seg)
-            else:
+            # Одиночные «спасибо» и «умереть» могут быть реальными репликами.
+            # Удаляем только доказанный последовательный повтор, сохраняя первый.
+            if repeat_streak >= 3 and not keep_legitimate_context(segments, i):
                 removed += 1
                 spam_removed += 1
                 if spam_removed <= 5:
@@ -134,22 +155,28 @@ def clean_segments(segments: list[Segment], source_name: str = "raw") -> tuple[l
                         f"[{format_ts(seg.start)} -> {format_ts(seg.end)}] "
                         f"Удалено: повторяющийся однословный сегмент\n"
                     )
-            continue
+                continue
 
         junk, reason = is_junk(seg)
-        if junk:
+        low_confidence = seg.avg_logprob < -0.55 or seg.no_speech_prob > 0.6
+        if junk and (reason in STRUCTURAL_JUNK_REASONS or low_confidence):
             removed += 1
             log.append(
                 f"[{format_ts(seg.start)} -> {format_ts(seg.end)}] "
                 f"Удалено ({reason}): {seg.text[:100]}{'…' if len(seg.text) > 100 else ''}\n"
             )
             continue
+        if junk:
+            log.append(
+                f"[{format_ts(seg.start)} -> {format_ts(seg.end)}] "
+                f"Сохранено для проверки ({reason}, уверенность нормальная): {seg.text[:100]}"
+                f"{'…' if len(seg.text) > 100 else ''}\n"
+            )
 
         cleaned = remove_loops(seg.text)
         if cleaned != seg.text:
             log.append(
-                f"[{format_ts(seg.start)} -> {format_ts(seg.end)}] "
-                f"Убран loop: …{seg.text[-80:]}\n"
+                f"[{format_ts(seg.start)} -> {format_ts(seg.end)}] Убран loop: …{seg.text[-80:]}\n"
             )
         if cleaned:
             kept.append(Segment(seg.start, seg.end, cleaned, seg.avg_logprob, seg.no_speech_prob))
@@ -158,15 +185,10 @@ def clean_segments(segments: list[Segment], source_name: str = "raw") -> tuple[l
         log.insert(5, f"... ещё {spam_removed - 5} однословных повторов удалено\n")
 
     log.append(
-        f"\n## Итого\n"
-        f"Было сегментов: {len(segments)}\n"
-        f"Стало: {len(kept)}\n"
-        f"Удалено: {removed}\n"
+        f"\n## Итого\nБыло сегментов: {len(segments)}\nСтало: {len(kept)}\nУдалено: {removed}\n"
     )
     if kept:
-        log.append(
-            f"Покрытие: {format_ts(kept[0].start)} — {format_ts(kept[-1].end)}\n"
-        )
+        log.append(f"Покрытие: {format_ts(kept[0].start)} — {format_ts(kept[-1].end)}\n")
     return kept, log
 
 
@@ -193,16 +215,13 @@ def parse_transcript_file(path) -> list[Segment]:
 
 
 def segments_to_txt(segments: list[Segment], header: str = "") -> str:
-    body = "\n\n".join(
-        f"[{format_ts(s.start)} -> {format_ts(s.end)}] {s.text}" for s in segments
-    )
+    body = "\n\n".join(f"[{format_ts(s.start)} -> {format_ts(s.end)}] {s.text}" for s in segments)
     return f"{header}\n\n{body}" if header else body
 
 
 def segments_to_srt(segments: list[Segment]) -> str:
     return "\n".join(
-        f"{i}\n{ts_srt(s.start)} --> {ts_srt(s.end)}\n{s.text}\n"
-        for i, s in enumerate(segments, 1)
+        f"{i}\n{ts_srt(s.start)} --> {ts_srt(s.end)}\n{s.text}\n" for i, s in enumerate(segments, 1)
     )
 
 

@@ -1,5 +1,8 @@
 """Тесты постобработки."""
+
+import tempfile
 import unittest
+from pathlib import Path
 
 from a2t_lib.postprocess import (
     Segment,
@@ -46,10 +49,21 @@ class TestPostprocess(unittest.TestCase):
             Segment(0, 1, "Тишина."),
             Segment(100, 101, "Умереть."),
             Segment(101, 102, "Умереть."),
+            Segment(102, 103, "Умереть."),
         ]
         cleaned, log = clean_segments(segments)
-        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(len(cleaned), 3)
+        self.assertEqual(cleaned[-1].text, "Умереть.")
         self.assertIn("однословный", "".join(log))
+
+    def test_single_legitimate_phrase_is_preserved(self):
+        cleaned, _ = clean_segments([Segment(0, 1, "Спасибо.")])
+        self.assertEqual([s.text for s in cleaned], ["Спасибо."])
+
+    def test_outro_phrase_with_normal_confidence_is_preserved(self):
+        cleaned, log = clean_segments([Segment(0, 1, "Спасибо за просмотр!")])
+        self.assertEqual(len(cleaned), 1)
+        self.assertIn("Сохранено для проверки", "".join(log))
 
     def test_legitimate_answer_kept_in_clean(self):
         segments = [
@@ -73,15 +87,15 @@ class TestPostprocess(unittest.TestCase):
         self.assertIn("[00:00:00.000 -> 00:00:01.000] Привет", txt)
 
     def test_parse_transcript_file(self):
-        from pathlib import Path
-        import tempfile
-
         content = (
             "[00:00:01.000 -> 00:00:02.000] Первая реплика\n\n"
             "[00:00:03.000 -> 00:00:04.000] Вторая реплика"
         )
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8",
+            mode="w",
+            suffix=".txt",
+            delete=False,
+            encoding="utf-8",
         ) as f:
             f.write(content)
             path = Path(f.name)

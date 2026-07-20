@@ -1,18 +1,15 @@
 """Тесты CLI."""
+
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from transcribe_cli import build_parser, config_from_args
 
 
 class TestCLI(unittest.TestCase):
     def test_list_presets_exits_zero(self):
-        with patch("transcribe_cli.main") as mock_main:
-            from transcribe_cli import main
-        # direct test via parser
         parser = build_parser()
         args = parser.parse_args(["--list-presets"])
         self.assertTrue(args.list_presets)
@@ -27,12 +24,26 @@ class TestCLI(unittest.TestCase):
 
     def test_config_from_args_overrides(self):
         parser = build_parser()
-        args = parser.parse_args([
-            "a.wav", "--beam-size", "7", "--no-condition-on-previous-text",
-        ])
+        args = parser.parse_args(
+            [
+                "a.wav",
+                "--beam-size",
+                "7",
+                "--no-condition-on-previous-text",
+            ]
+        )
         cfg = config_from_args(args)
         self.assertEqual(cfg.params.beam_size, 7)
         self.assertFalse(cfg.params.condition_on_previous_text)
+
+    def test_gpu_index_and_resume_flags(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            ["a.wav", "--device", "cuda", "--device-index", "1", "--no-resume"]
+        )
+        cfg = config_from_args(args)
+        self.assertEqual(cfg.device_index, 1)
+        self.assertFalse(cfg.resume)
 
     def test_config_from_json_file(self):
         data = {
@@ -59,6 +70,12 @@ class TestCLI(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args([])
         with self.assertRaises(SystemExit):
+            config_from_args(args)
+
+    def test_invalid_clip_range_exits_cleanly(self):
+        parser = build_parser()
+        args = parser.parse_args(["a.wav", "--clip-start", "10", "--clip-end", "5"])
+        with self.assertRaisesRegex(SystemExit, "clip_end"):
             config_from_args(args)
 
 
