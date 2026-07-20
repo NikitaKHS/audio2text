@@ -265,10 +265,6 @@ class PresetCard(ctk.CTkFrame):
         self._on_select = on_select
         self._selected = False
 
-        self.bind("<Button-1>", self._click)
-        for w in self.winfo_children():
-            w.bind("<Button-1>", self._click)
-
         pad = ctk.CTkFrame(self, fg_color="transparent")
         pad.pack(fill="both", expand=True, padx=16, pady=16)
 
@@ -283,7 +279,6 @@ class PresetCard(ctk.CTkFrame):
             anchor="w",
         )
         self.title_lbl.pack(side="left", anchor="w")
-        self.title_lbl.bind("<Button-1>", self._click)
         if badge:
             badge_label = ctk.CTkLabel(
                 title_row,
@@ -295,9 +290,8 @@ class PresetCard(ctk.CTkFrame):
                 font=FONTS["small"],
             )
             badge_label.pack(side="right")
-            badge_label.bind("<Button-1>", self._click)
 
-        ctk.CTkLabel(
+        self.description_lbl = ctk.CTkLabel(
             pad,
             text=description,
             font=FONTS["caption"],
@@ -305,9 +299,10 @@ class PresetCard(ctk.CTkFrame):
             anchor="w",
             wraplength=220,
             justify="left",
-        ).pack(anchor="w", pady=(6, 0))
+        )
+        self.description_lbl.pack(anchor="w", pady=(6, 0))
 
-        ctk.CTkLabel(
+        self.meta_lbl = ctk.CTkLabel(
             pad,
             text=meta,
             font=FONTS["small"],
@@ -315,7 +310,21 @@ class PresetCard(ctk.CTkFrame):
             anchor="w",
             justify="left",
             wraplength=240,
-        ).pack(anchor="w", pady=(10, 0))
+        )
+        self.meta_lbl.pack(anchor="w", pady=(10, 0))
+
+        # CustomTkinter composes a card from nested frames, canvases and labels.
+        # Binding only the outer frame leaves most of the visible card inert.
+        self._bind_click_tree(self)
+
+    def _bind_click_tree(self, widget: tk.Misc) -> None:
+        widget.bind("<Button-1>", self._click, add="+")
+        try:
+            widget.configure(cursor="hand2")
+        except (tk.TclError, TypeError, ValueError):
+            pass
+        for child in widget.winfo_children():
+            self._bind_click_tree(child)
 
     def _click(self, _event=None) -> None:
         self._on_select(self.preset_id)

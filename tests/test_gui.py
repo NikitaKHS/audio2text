@@ -50,6 +50,17 @@ class TestGUISmoke(unittest.TestCase):
         self.assertEqual(self.app.engine_var.get(), "whisper")
         self.assertIn("WHISPER", self.app.engine_badge_var.get())
 
+    def test_engine_card_description_is_clickable(self):
+        self.app._select_engine("whisper")
+        giga_card = self.app._engine_cards["gigaam"]
+
+        # CTkLabel renders its text through the internal Tk label; this is the
+        # exact surface that receives a real mouse click.
+        giga_card.description_lbl._label.event_generate("<Button-1>")
+        self.app.update()
+
+        self.assertEqual(self.app.engine_var.get(), "gigaam")
+
 
 if __name__ == "__main__":
     unittest.main()
