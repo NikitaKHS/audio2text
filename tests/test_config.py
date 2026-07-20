@@ -1,10 +1,16 @@
 """Тесты конфигурации и пресетов."""
+
 import json
-import tempfile
 import unittest
 from pathlib import Path
 
-from a2t_lib.config import PRESETS, TranscribeConfig, TranscribeParams
+from a2t_lib.config import (
+    DEFAULT_HOTWORDS,
+    DEFAULT_PROMPT,
+    PRESETS,
+    TranscribeConfig,
+    TranscribeParams,
+)
 
 
 class TestConfig(unittest.TestCase):
@@ -42,6 +48,7 @@ class TestConfig(unittest.TestCase):
         paths = cfg.output_paths()
         self.assertEqual(paths["final_txt"], Path(r"C:\out\custom_final.txt"))
         self.assertEqual(paths["raw_txt"], Path(r"C:\out\custom_transcript_raw.txt"))
+        self.assertEqual(paths["checkpoint"], Path(r"C:\out\custom_transcript.partial.jsonl"))
 
     def test_effective_compute_type_default(self):
         cfg = TranscribeConfig.from_preset(Path("a.wav"), preset="fast")
@@ -54,6 +61,33 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(d["preset"], "balanced")
         self.assertEqual(d["params"]["beam_size"], 5)
         self.assertIsInstance(json.dumps(d, ensure_ascii=False), str)
+
+    def test_preset_params_are_not_shared_between_jobs(self):
+        first = TranscribeConfig.from_preset(Path("first.wav"), preset="safe")
+        second = TranscribeConfig.from_preset(Path("second.wav"), preset="safe")
+        first.params.beam_size = 99
+        self.assertEqual(second.params.beam_size, 5)
+        self.assertEqual(PRESETS["safe"]["params"].beam_size, 5)
+
+    def test_validate_rejects_invalid_clip_range(self):
+        cfg = TranscribeConfig.from_preset(Path("a.wav"), preset="safe")
+        cfg.clip_start = 10
+        cfg.clip_end = 5
+        with self.assertRaisesRegex(ValueError, "clip_end"):
+            cfg.validate()
+
+    def test_validate_rejects_path_traversal_in_stem(self):
+        cfg = TranscribeConfig.from_preset(Path("a.wav"), preset="safe", stem="../outside")
+        with self.assertRaisesRegex(ValueError, "Префикс"):
+            cfg.validate()
+
+    def test_default_context_is_neutral(self):
+        self.assertEqual(DEFAULT_PROMPT, "")
+        self.assertEqual(DEFAULT_HOTWORDS, "")
+
+    def test_from_dict_rejects_unknown_fields(self):
+        with self.assertRaisesRegex(ValueError, "Неизвестные поля"):
+            TranscribeConfig.from_dict({"audio_path": "a.wav", "surprise": True})
 
 
 if __name__ == "__main__":

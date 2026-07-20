@@ -1,4 +1,5 @@
 """Тесты движка транскрибации (с моком модели)."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,14 +83,16 @@ class TestEngine(unittest.TestCase):
             self.assertTrue(paths["final_plain"].is_file())
             self.assertTrue(paths["raw_txt"].is_file())
             self.assertTrue(paths["log_txt"].is_file())
+            self.assertTrue(paths["review_txt"].is_file())
 
             final = paths["final_txt"].read_text(encoding="utf-8")
             self.assertIn("Привет", final)
             self.assertIn("Нормально", final)
+            self.assertIn("Спасибо", final)
 
-            # 3 повтора «Спасибо» — последние 2 отсечены на лету
+            # Из трёх повторов сохраняются первые два: это защищает реальные короткие диалоги.
             raw = paths["raw_txt"].read_text(encoding="utf-8")
-            self.assertEqual(raw.count("Спасибо"), 1)
+            self.assertEqual(raw.count("Спасибо"), 2)
 
             model.transcribe.assert_called_once()
             call_kwargs = model.transcribe.call_args[1]
@@ -97,6 +100,8 @@ class TestEngine(unittest.TestCase):
 
             # progress: init + segments + done
             self.assertTrue(any(p[0] < 0 for p in progress_calls))
+            review = paths["review_txt"].read_text(encoding="utf-8")
+            self.assertIn("Сомнительных сегментов не найдено", review)
 
     def test_transcribe_file_missing_audio(self):
         cfg = TranscribeConfig.from_preset(Path("nonexistent.wav"), preset="safe")
@@ -127,6 +132,48 @@ class TestEngine(unittest.TestCase):
 
             with self.assertRaises(InterruptedError):
                 transcribe_file(cfg, model=model, cancel_check=cancel_check)
+
+            self.assertTrue(cfg.output_paths()["checkpoint"].is_file())
+
+    def test_resume_uses_checkpoint_and_removes_it_after_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            audio = Path(tmp) / "test.wav"
+            audio.write_bytes(b"x")
+            cfg = TranscribeConfig.from_preset(audio, preset="safe")
+
+            first_model = MagicMock()
+            first_model.transcribe.return_value = (
+                [
+                    FakeWhisperSegment(0, 1, "Первый"),
+                    FakeWhisperSegment(1, 2, "Не должен сохраниться"),
+                ],
+                FakeInfo(),
+            )
+            checks = iter([False, False, False, True])
+            with self.assertRaises(InterruptedError):
+                transcribe_file(
+                    cfg,
+                    model=first_model,
+                    log=lambda _message: None,
+                    cancel_check=lambda: next(checks),
+                )
+
+            checkpoint = cfg.output_paths()["checkpoint"]
+            self.assertTrue(checkpoint.is_file())
+
+            second_model = MagicMock()
+            second_model.transcribe.return_value = (
+                [FakeWhisperSegment(1, 2, "Второй")],
+                FakeInfo(),
+            )
+            paths = transcribe_file(cfg, model=second_model, log=lambda _message: None)
+
+            call_kwargs = second_model.transcribe.call_args.kwargs
+            self.assertEqual(call_kwargs["clip_timestamps"], [1.0])
+            final = paths["final_txt"].read_text(encoding="utf-8")
+            self.assertIn("Первый", final)
+            self.assertIn("Второй", final)
+            self.assertFalse(checkpoint.exists())
 
 
 if __name__ == "__main__":

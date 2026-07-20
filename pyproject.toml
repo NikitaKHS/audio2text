@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio2text-local"
+version = "2.0.0"
+description = "Локальная транскрибация через Whisper GPU и GigaAM-v3 RNNT+CTC"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "NikitaKHS" },
+]
+keywords = ["speech-to-text", "whisper", "gigaam", "russian", "transcription"]
+dependencies = [
+    "faster-whisper==1.2.1",
+    "tqdm==4.69.0",
+    "customtkinter==6.0.0",
+]
+
+[project.scripts]
+audio2text = "transcribe_cli:main"
+audio2text-gui = "transcribe_gui:main"
+audio2text-accuracy = "transcribe_accuracy:main"
+
+[project.urls]
+Homepage = "https://github.com/NikitaKHS/audio2text"
+Repository = "https://github.com/NikitaKHS/audio2text.git"
+Issues = "https://github.com/NikitaKHS/audio2text/issues"
+
+[project.optional-dependencies]
+gpu-windows = [
+    "nvidia-cublas-cu12==12.9.2.10",
+    "nvidia-cuda-nvrtc-cu12==12.9.86",
+    "nvidia-cudnn-cu12==9.24.0.43",
+]
+accuracy = [
+    "gigaam[torch] @ git+https://github.com/salute-developers/GigaAM.git@559d88d6b72541412743929f633a6ae7c9950b85",
+]
+
+[tool.setuptools]
+packages = ["a2t_lib"]
+py-modules = ["transcribe_cli", "transcribe_gui", "transcribe_accuracy"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

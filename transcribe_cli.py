@@ -1,4 +1,5 @@
 """CLI. Обёртка над a2t_lib.engine.transcribe_file."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,8 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from a2t_lib.config import PRESETS, TranscribeConfig, TranscribeParams
-from a2t_lib.engine import transcribe_file
+from a2t_lib.config import COMPUTE_TYPES, DEVICES, MODELS, PRESETS, TranscribeConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,14 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="safe",
         help="Пресет качества/скорости",
     )
-    p.add_argument("--model", choices=[
-        "tiny", "base", "small", "medium", "large-v2",
-        "large-v3", "large-v3-turbo", "distil-large-v3",
-    ])
-    p.add_argument("--device", choices=["cuda", "cpu", "auto"], default="cuda")
+    p.add_argument("--model", choices=MODELS)
+    p.add_argument("--device", choices=DEVICES, default="auto")
+    p.add_argument("--device-index", type=int, default=0, help="Индекс GPU для нескольких карт")
     p.add_argument(
         "--compute-type",
-        choices=["default", "float32", "float16", "int8", "int8_float16", "bfloat16"],
+        choices=COMPUTE_TYPES,
         default="default",
     )
     p.add_argument("--language", default="ru")
@@ -57,37 +55,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-plain", action="store_true")
     p.add_argument("--no-raw", action="store_true")
     p.add_argument("--no-review", action="store_true")
+    p.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Продолжить совместимую незавершённую транскрибацию",
+    )
     p.add_argument("--list-presets", action="store_true", help="Показать пресеты и выйти")
+    p.add_argument("--system-info", action="store_true", help="Показать найденные GPU и выйти")
     p.add_argument("--save-config", type=Path, help="Сохранить итоговый конфиг в JSON")
     p.add_argument("--load-config", type=Path, help="Загрузить конфиг из JSON")
+    p.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Проверить конфигурацию без загрузки модели и транскрибации",
+    )
+    p.add_argument("--debug", action="store_true", help="Показать traceback при ошибке")
     return p
 
 
 def config_from_args(args: argparse.Namespace) -> TranscribeConfig:
     if args.load_config:
-        data = json.loads(args.load_config.read_text(encoding="utf-8"))
-        cfg = TranscribeConfig(
-            audio_path=Path(data["audio_path"]),
-            output_dir=Path(data["output_dir"]) if data.get("output_dir") else None,
-            stem=data.get("stem"),
-            model=data.get("model", "large-v3"),
-            device=data.get("device", "cuda"),
-            compute_type=data.get("compute_type", "float16"),
-            language=data.get("language", "ru"),
-            preset=data.get("preset", "safe"),
-            initial_prompt=data.get("initial_prompt", ""),
-            hotwords=data.get("hotwords", ""),
-            postprocess=data.get("postprocess", True),
-            save_srt=data.get("save_srt", True),
-            save_plain=data.get("save_plain", True),
-            save_raw=data.get("save_raw", True),
-            save_review=data.get("save_review", True),
-            clip_start=data.get("clip_start"),
-            clip_end=data.get("clip_end"),
-        )
-        if "params" in data:
-            cfg.params = TranscribeParams(**data["params"])
-        return cfg
+        try:
+            data = json.loads(args.load_config.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError as exc:
+            raise SystemExit(f"Файл конфигурации не найден: {args.load_config}") from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Не удалось прочитать конфигурацию: {exc}") from exc
+        try:
+            return TranscribeConfig.from_dict(data)
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(f"Некорректная конфигурация: {exc}") from exc
 
     if not args.audio:
         raise SystemExit("Укажите путь к аудиофайлу или --load-config")
@@ -101,6 +99,7 @@ def config_from_args(args: argparse.Namespace) -> TranscribeConfig:
     if args.model:
         cfg.model = args.model
     cfg.device = args.device
+    cfg.device_index = args.device_index
     if args.compute_type != "default":
         cfg.compute_type = args.compute_type
     cfg.language = args.language
@@ -121,8 +120,13 @@ def config_from_args(args: argparse.Namespace) -> TranscribeConfig:
     cfg.save_plain = not args.no_plain
     cfg.save_raw = not args.no_raw
     cfg.save_review = not args.no_review
+    cfg.resume = args.resume
     cfg.clip_start = args.clip_start
     cfg.clip_end = args.clip_end
+    try:
+        cfg.validate()
+    except ValueError as exc:
+        raise SystemExit(f"Некорректные параметры: {exc}") from exc
     return cfg
 
 
@@ -136,22 +140,50 @@ def main() -> None:
             print(f"  model={meta['model']}, compute={meta['compute_type']}")
         return
 
+    if args.system_info:
+        from a2t_lib.hardware import detect_gpus
+
+        gpus = detect_gpus()
+        if not gpus:
+            print("NVIDIA GPU не найден. Будет использован CPU (int8).")
+        for gpu in gpus:
+            print(gpu.summary())
+            if gpu.driver:
+                print(f"  driver={gpu.driver}, compute_capability={gpu.compute_capability}")
+            if gpu.compute_types:
+                print(f"  compute_types={', '.join(gpu.compute_types)}")
+        return
+
     cfg = config_from_args(args)
 
     if args.save_config:
+        args.save_config.parent.mkdir(parents=True, exist_ok=True)
         args.save_config.write_text(
-            json.dumps(cfg.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            json.dumps(cfg.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         print(f"Конфиг сохранён: {args.save_config}")
 
+    if args.validate_only:
+        try:
+            cfg.validate(check_audio=True)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Ошибка: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print("Конфигурация корректна.")
+        return
+
     try:
+        # Тяжёлый ML runtime не нужен для --help, --list-presets и проверки JSON.
+        from a2t_lib.engine import transcribe_file
+
         transcribe_file(cfg)
     except KeyboardInterrupt:
         print("\nПрервано.", file=sys.stderr)
         sys.exit(130)
-    except FileNotFoundError as e:
-        print(e, file=sys.stderr)
+    except Exception as exc:
+        if args.debug:
+            raise
+        print(f"Ошибка: {exc}", file=sys.stderr)
         sys.exit(1)
 
 

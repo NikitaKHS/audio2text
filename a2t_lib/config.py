@@ -1,7 +1,9 @@
 """Пресеты и конфиг одного прогона транскрибации."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+import re
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 MODELS = [
@@ -18,11 +20,12 @@ MODELS = [
 DEVICES = ["cuda", "cpu", "auto"]
 COMPUTE_TYPES = ["default", "float32", "float16", "int8", "int8_float16", "bfloat16"]
 
-DEFAULT_PROMPT = (
-    "Психотерапевтическая сессия. Разговор на русском языке. "
-    "Терапия, аэрофобия, одиночество, отношения."
-)
-DEFAULT_HOTWORDS = "терапия аэрофобия психотерапия"
+# Контекст, специфичный для одной записи, искажает распознавание остальных файлов.
+# Пользователь может заполнить эти поля явно в GUI или CLI.
+DEFAULT_PROMPT = ""
+DEFAULT_HOTWORDS = ""
+
+_INVALID_STEM_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 @dataclass
@@ -107,7 +110,8 @@ class TranscribeConfig:
     output_dir: Path | None = None
     stem: str | None = None
     model: str = "large-v3"
-    device: str = "cuda"
+    device: str = "auto"
+    device_index: int = 0
     compute_type: str = "float16"
     language: str = "ru"
     preset: str = "safe"
@@ -119,6 +123,7 @@ class TranscribeConfig:
     save_plain: bool = True
     save_raw: bool = True
     save_review: bool = True
+    resume: bool = True
     clip_start: float | None = None
     clip_end: float | None = None
 
@@ -129,19 +134,104 @@ class TranscribeConfig:
         self.preset = name
         self.model = p["model"]
         self.compute_type = p["compute_type"]
-        self.params = p["params"]
+        # У каждого запуска должен быть независимый набор параметров.
+        self.params = replace(p["params"])
 
     @classmethod
     def from_preset(cls, audio_path: Path, preset: str = "safe", **kwargs) -> TranscribeConfig:
         cfg = cls(audio_path=Path(audio_path))
         cfg.apply_preset(preset)
+        valid_fields = {f.name for f in fields(cls)}
         for key, val in kwargs.items():
-            if hasattr(cfg, key):
-                setattr(cfg, key, val)
+            if key not in valid_fields:
+                raise TypeError(f"Неизвестный параметр конфигурации: {key}")
+            setattr(cfg, key, val)
         return cfg
 
+    @classmethod
+    def from_dict(cls, data: dict) -> TranscribeConfig:
+        """Безопасно восстанавливает конфигурацию из JSON-совместимого словаря."""
+        if not isinstance(data, dict):
+            raise ValueError("Конфигурация должна быть JSON-объектом")
+        if not data.get("audio_path"):
+            raise ValueError("В конфигурации отсутствует audio_path")
+
+        known = {f.name for f in fields(cls)}
+        unknown = set(data) - known
+        if unknown:
+            raise ValueError(f"Неизвестные поля конфигурации: {', '.join(sorted(unknown))}")
+
+        values = dict(data)
+        values["audio_path"] = Path(values["audio_path"])
+        if values.get("output_dir"):
+            values["output_dir"] = Path(values["output_dir"])
+        params_data = values.pop("params", None)
+        cfg = cls(**values)
+        if params_data is not None:
+            if not isinstance(params_data, dict):
+                raise ValueError("params должен быть JSON-объектом")
+            param_names = {f.name for f in fields(TranscribeParams)}
+            unknown_params = set(params_data) - param_names
+            if unknown_params:
+                raise ValueError(
+                    f"Неизвестные параметры транскрибации: {', '.join(sorted(unknown_params))}"
+                )
+            cfg.params = TranscribeParams(**params_data)
+        cfg.validate()
+        return cfg
+
+    def validate(self, *, check_audio: bool = False) -> None:
+        """Проверяет конфигурацию до загрузки тяжёлой модели."""
+        self.audio_path = Path(self.audio_path)
+        if check_audio and not self.audio_path.expanduser().is_file():
+            resolved_audio = self.audio_path.expanduser().resolve()
+            raise FileNotFoundError(f"Аудиофайл не найден: {resolved_audio}")
+        if self.output_dir is not None:
+            self.output_dir = Path(self.output_dir)
+        if self.preset not in PRESETS:
+            raise ValueError(f"Неизвестный пресет: {self.preset}")
+        if not self.model or not self.model.strip():
+            raise ValueError("Название модели не может быть пустым")
+        if self.device not in DEVICES:
+            raise ValueError(f"Устройство должно быть одним из: {', '.join(DEVICES)}")
+        if self.device_index < 0:
+            raise ValueError("device_index не может быть отрицательным")
+        if self.compute_type not in COMPUTE_TYPES:
+            raise ValueError(f"compute_type должен быть одним из: {', '.join(COMPUTE_TYPES)}")
+        if not self.language or not self.language.strip():
+            raise ValueError("Код языка не может быть пустым")
+
+        if self.stem is not None:
+            stem = self.stem.strip()
+            if not stem or stem in {".", ".."} or _INVALID_STEM_RE.search(stem):
+                raise ValueError("Префикс имени файла содержит недопустимые символы")
+            if stem.endswith((" ", ".")):
+                raise ValueError("Префикс имени файла не должен оканчиваться пробелом или точкой")
+            self.stem = stem
+
+        p = self.params
+        if p.beam_size < 1 or p.best_of < 1:
+            raise ValueError("beam_size и best_of должны быть не меньше 1")
+        if p.patience <= 0:
+            raise ValueError("patience должен быть больше 0")
+        if p.temperature < 0:
+            raise ValueError("temperature не может быть отрицательной")
+        for name in ("vad_threshold", "no_speech_threshold"):
+            value = getattr(p, name)
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} должен быть в диапазоне от 0 до 1")
+        if p.vad_min_speech_ms < 0 or p.vad_min_silence_ms < 0:
+            raise ValueError("Длительности VAD не могут быть отрицательными")
+        if self.clip_start is not None and self.clip_start < 0:
+            raise ValueError("clip_start не может быть отрицательным")
+        if self.clip_end is not None:
+            if self.clip_start is None:
+                raise ValueError("clip_end требует указать clip_start")
+            if self.clip_end <= self.clip_start:
+                raise ValueError("clip_end должен быть больше clip_start")
+
     def resolved_output_dir(self) -> Path:
-        return self.output_dir or self.audio_path.parent
+        return (self.output_dir or self.audio_path.parent).expanduser()
 
     def resolved_stem(self) -> str:
         return self.stem or self.audio_path.stem
@@ -156,6 +246,7 @@ class TranscribeConfig:
             "raw_txt": out / f"{stem}_transcript_raw.txt",
             "review_txt": out / f"{stem}_review.txt",
             "log_txt": out / f"{stem}_corrections_log.txt",
+            "checkpoint": out / f"{stem}_transcript.partial.jsonl",
         }
 
     def effective_compute_type(self) -> str:
@@ -165,7 +256,7 @@ class TranscribeConfig:
 
     def to_dict(self) -> dict:
         d = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "params"}
-        d["params"] = self.params.__dict__
+        d["params"] = asdict(self.params)
         d["audio_path"] = str(self.audio_path)
         d["output_dir"] = str(self.output_dir) if self.output_dir else None
         return d

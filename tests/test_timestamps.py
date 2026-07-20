@@ -1,4 +1,5 @@
 """Тесты форматирования таймкодов."""
+
 import unittest
 
 from a2t_lib.timestamps import format_ts, ts_srt
