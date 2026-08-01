@@ -15,7 +15,7 @@ authors = [
 keywords = ["speech-to-text", "whisper", "gigaam", "russian", "transcription"]
 dependencies = [
     "faster-whisper==1.2.1",
-    "tqdm==4.69.0",
+    "tqdm==4.70.0",
     "customtkinter==6.0.0",
 ]
 
